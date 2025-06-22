@@ -5,11 +5,14 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/kelseyhightower/envconfig"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"log"
+	"marznode/api/pb"
 	"marznode/internal/api"
 	"marznode/internal/config"
 	"marznode/internal/repo"
 	"marznode/internal/service"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -41,23 +44,29 @@ func main() {
 		logger.Error("Error to check connection to postgres", zap.Error(err))
 	}
 
-	userRepository := repo.NewUserRepository(pool, logger)
-	inboundRepository := repo.NewInboundRepository(pool, logger)
+	marznodeRepository := repo.NewMarznodeRepository(pool, logger)
 
-	repos := repo.NewRepository(inboundRepository, userRepository)
+	repos := repo.NewRepository(marznodeRepository)
 
-	userService := service.NewUserService(repos.User, logger)
-	inboundService := service.NewInboundService(repos.Inbound, logger)
-	marznodeService := service.NewMarznodeService(logger)
+	marznodeService := service.NewMarznodeService(repos.MarznodeRepo, logger)
 
-	services := service.NewService(marznodeService, userService, inboundService)
+	services := service.NewService(marznodeService)
 
-	app := api.NewRouters(&api.Routers{Service: services})
+	handler := api.NewMarznodeHandler(services.MarzService, logger)
+
+	server := grpc.NewServer()
+
+	pb.RegisterMarzServiceServer(server, handler)
+
+	lis, err := net.Listen("tcp", cfg.Grpc.Port)
+	if err != nil {
+		logger.Fatal("Failed to listen", zap.Error(err))
+	}
 
 	go func() {
-		logger.Info("starting http server")
-		if err := app.Listen(":8080"); err != nil {
-			logger.Error("Error starting http server", zap.Error(err))
+		logger.Info("starting gRPC server")
+		if err := server.Serve(lis); err != nil {
+			logger.Fatal("Failed to serve", zap.Error(err))
 		}
 	}()
 
@@ -67,9 +76,7 @@ func main() {
 
 	logger.Info("Shutting down server...")
 
-	if err := app.Shutdown(); err != nil {
-		logger.Error("Error shutting down server", zap.Error(err))
-	}
+	server.GracefulStop()
 
 	if err = repo.CloseConnection(pool); err != nil {
 		logger.Error("Error closing connection", zap.Error(err))

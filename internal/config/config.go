@@ -7,6 +7,11 @@ const EnvPath = ""
 type AppConfig struct {
 	LogLevel   string `envconfig:"LOG_LEVEL" required:"true"`
 	PostgresDB PostgresDB
+	Grpc       Grpc
+}
+
+type Grpc struct {
+	Port string `envconfig:"PORT" required:"true"`
 }
 
 type PostgresDB struct {

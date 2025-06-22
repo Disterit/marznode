@@ -1,34 +1,18 @@
 package service
 
 import (
-	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
+	"marznode/internal/repo"
 )
 
-type MarznodeService struct {
-	log *zap.SugaredLogger
+type marznodeService struct {
+	repo repo.MarznodeRepo
+	log  *zap.SugaredLogger
 }
 
-func NewMarznodeService(log *zap.SugaredLogger) *MarznodeService {
-	return &MarznodeService{log: log}
-}
-
-func (m *MarznodeService) ResolveTag(ctx *fiber.Ctx) error {
-	return nil
-}
-
-func (m *MarznodeService) FetchUserStats(ctx *fiber.Ctx) error {
-	return nil
-}
-
-func (m *MarznodeService) StreamBackendLogs(ctx *fiber.Ctx) error {
-	return nil
-}
-
-func (m *MarznodeService) RestartBackend(ctx *fiber.Ctx) error {
-	return nil
-}
-
-func (m *MarznodeService) GetBackendStats(ctx *fiber.Ctx) error {
-	return nil
+func NewMarznodeService(repo repo.MarznodeRepo, log *zap.SugaredLogger) *marznodeService {
+	return &marznodeService{
+		repo: repo,
+		log:  log,
+	}
 }
