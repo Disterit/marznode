@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"marznode/api/pb"
 	"marznode/internal/service"
 	"marznode/pkg/backend/common"
@@ -11,13 +13,13 @@ import (
 )
 
 type MarznodeHandler struct {
-	marznode service.Marznode
+	marznode service.MarznodeMemory
 	log      *zap.SugaredLogger
 	pb.UnimplementedMarzServiceServer
 	backends []common.VPNBackend
 }
 
-func NewMarznodeHandler(marznode service.Marznode, log *zap.SugaredLogger, backend ...common.VPNBackend) *MarznodeHandler {
+func NewMarznodeHandler(marznode service.MarznodeMemory, log *zap.SugaredLogger, backend ...common.VPNBackend) *MarznodeHandler {
 	return &MarznodeHandler{
 		marznode: marznode,
 		log:      log,
@@ -26,8 +28,17 @@ func NewMarznodeHandler(marznode service.Marznode, log *zap.SugaredLogger, backe
 }
 
 func (h *MarznodeHandler) SyncUsers(server grpc.ClientStreamingServer[pb.UserData, pb.Empty]) error {
+	for {
+		userData, err := server.Recv()
+		if err == io.EOF {
+			return server.SendAndClose(&pb.Empty{})
+		}
+		if err != nil {
+			return err
+		}
 
-	return nil
+		h.log.Infof("Received user data: %v", userData)
+	}
 }
 
 func (h *MarznodeHandler) RepopulateUsers(ctx context.Context, user *pb.UsersData) (*pb.Empty, error) {
@@ -36,8 +47,51 @@ func (h *MarznodeHandler) RepopulateUsers(ctx context.Context, user *pb.UsersDat
 }
 
 func (h *MarznodeHandler) FetchBackends(ctx context.Context, empty *pb.Empty) (*pb.BackendsResponse, error) {
+	var backends []*pb.Backend
 
-	return nil, nil
+	for i, backend := range h.backends {
+		version, err := backend.Version()
+		if err != nil {
+			h.log.Warnf("Failed to get version for backend %d: %v", i, err)
+			version = "unknown"
+		}
+
+		inbounds, err := backend.ListInbounds(ctx)
+		if err != nil {
+			h.log.Errorf("Failed to get inbounds for backend %d: %v", i, err)
+			continue
+		}
+
+		var pbInbounds []*pb.Inbound
+		for _, inbound := range inbounds {
+			configJSON, err := json.Marshal(inbound.Config)
+			if err != nil {
+				h.log.Warnf("Failed to marshal config for inbound %s: %v", inbound.Tag, err)
+				continue
+			}
+
+			configStr := string(configJSON)
+			pbInbound := &pb.Inbound{
+				Tag:    inbound.Tag,
+				Config: &configStr,
+			}
+			pbInbounds = append(pbInbounds, pbInbound)
+		}
+
+		backendType := backend.BackendType()
+		pbBackend := &pb.Backend{
+			Name:     backendType,
+			Type:     &backendType,
+			Version:  &version,
+			Inbounds: pbInbounds,
+		}
+
+		backends = append(backends, pbBackend)
+	}
+
+	return &pb.BackendsResponse{
+		Backends: backends,
+	}, nil
 }
 
 func (h *MarznodeHandler) FetchUsersStats(ctx context.Context, empty *pb.Empty) (*pb.UsersStats, error) {
