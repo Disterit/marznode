@@ -2,22 +2,26 @@ package api
 
 import (
 	"context"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
 	"marznode/api/pb"
 	"marznode/internal/service"
+	"marznode/pkg/backend/common"
+
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 type MarznodeHandler struct {
 	marznode service.Marznode
 	log      *zap.SugaredLogger
 	pb.UnimplementedMarzServiceServer
+	backends []common.VPNBackend
 }
 
-func NewMarznodeHandler(marznode service.Marznode, log *zap.SugaredLogger) *MarznodeHandler {
+func NewMarznodeHandler(marznode service.Marznode, log *zap.SugaredLogger, backend ...common.VPNBackend) *MarznodeHandler {
 	return &MarznodeHandler{
 		marznode: marznode,
 		log:      log,
+		backends: backend,
 	}
 }
 
@@ -37,8 +41,26 @@ func (h *MarznodeHandler) FetchBackends(ctx context.Context, empty *pb.Empty) (*
 }
 
 func (h *MarznodeHandler) FetchUsersStats(ctx context.Context, empty *pb.Empty) (*pb.UsersStats, error) {
+	var allUserStats []*pb.UsersStats_UserStats
 
-	return nil, nil
+	for _, backend := range h.backends {
+		stats, err := backend.GetUsages(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if usageMap, ok := stats.(map[int64]int64); ok {
+			for uid, usage := range usageMap {
+				allUserStats = append(allUserStats, &pb.UsersStats_UserStats{
+					Uid:   uint32(uid),
+					Usage: uint64(usage),
+				})
+			}
+		}
+	}
+
+	return &pb.UsersStats{
+		UsersStats: allUserStats,
+	}, nil
 }
 
 func (h *MarznodeHandler) FetchBackendConfig(ctx context.Context, backend *pb.Backend) (*pb.BackendConfig, error) {
